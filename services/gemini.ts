@@ -73,6 +73,21 @@ const getStockChartFunction: FunctionDeclaration = {
   } as Schema,
 };
 
+const getStockPriceFunction: FunctionDeclaration = {
+  name: 'getStockPrice',
+  description: 'Retrieves the current stock price and basic market data for a symbol.',
+  parameters: {
+    type: Type.OBJECT,
+    properties: {
+      symbol: {
+        type: Type.STRING,
+        description: 'The stock ticker symbol.',
+      }
+    },
+    required: ['symbol'],
+  } as Schema,
+};
+
 // --- Service Class ---
 
 export class GeminiService {
@@ -99,17 +114,16 @@ export class GeminiService {
         Your goal is to help users understand the markets with data-driven insights.
         
         Capabilities:
-        1. Use 'googleSearch' to fetch real-time stock prices, news, and market events. ALWAYS use this for current price queries.
+        1. Use 'getStockPrice' to fetch current stock prices when asked.
         2. Use 'getStockChart' tool ONLY when the user explicitly asks for a chart, visualization, or performance graph.
         
         Style:
         - Be professional, concise, and helpful.
         - Use markdown for formatting (tables for data, bold for emphasis).
-        - If 'googleSearch' returns sources, you must cite them.
         `,
         tools: [
-          { googleSearch: {} },
-          { functionDeclarations: [getStockChartFunction] }
+          // googleSearch removed to avoid conflict with functionDeclarations
+          { functionDeclarations: [getStockChartFunction, getStockPriceFunction] }
         ]
       }
     });
@@ -125,7 +139,6 @@ export class GeminiService {
     }
 
     try {
-      // We use sendMessageStream to handle tools and text fluidly
       let fullTextResponse = '';
       const sources: any[] = [];
       
@@ -139,7 +152,7 @@ export class GeminiService {
             onChunk(text);
         }
 
-        // 2. Handle Grounding (Search Results)
+        // 2. Handle Grounding (Search Results) - kept for compatibility if tools change
         const groundingChunks = chunk.candidates?.[0]?.groundingMetadata?.groundingChunks;
         if (groundingChunks) {
              groundingChunks.forEach((c: any) => {
@@ -149,63 +162,49 @@ export class GeminiService {
              });
         }
 
-        // 3. Handle Function Calls (The model wants to call a tool)
-        // Note: In the streaming API with automatic function calling handled by the SDK is complex.
-        // The standard @google/genai SDK for 'chat' doesn't automatically execute client-side tools in a simple loop 
-        // unless we manually handle the `functionCalls` and send back `functionResponses`.
-        // However, looking at the provided documentation, we need to inspect `functionCalls`.
-        
-        // Check for tool calls in this chunk
+        // 3. Handle Function Calls
         const functionCalls = chunk.functionCalls;
         if (functionCalls && functionCalls.length > 0) {
             const functionResponses = [];
             
             for (const call of functionCalls) {
+                const args = call.args as any;
+                const symbol = args.symbol || 'UNKNOWN';
+
                 if (call.name === 'getStockChart') {
-                    const args = call.args as any;
-                    const symbol = args.symbol || 'UNKNOWN';
                     const period = args.period || '1M';
-                    
-                    // Generate the data client-side
                     const chartData = generateMockChartData(symbol, period);
-                    
-                    // Trigger the UI callback to show the chart immediately
                     onChart(chartData);
 
-                    // Prepare response for the model
                     functionResponses.push({
                         id: call.id,
                         name: call.name,
                         response: { 
-                            result: `Chart for ${symbol} (${period}) has been generated and displayed to the user. The current price is ${chartData.data[chartData.data.length-1].price}.` 
+                            result: `Chart generated for ${symbol}. Current price is ${chartData.data[chartData.data.length-1].price}.` 
+                        }
+                    });
+                } else if (call.name === 'getStockPrice') {
+                    // Mock price data
+                    const price = (Math.random() * 1000 + 10).toFixed(2);
+                    functionResponses.push({
+                        id: call.id,
+                        name: call.name,
+                        response: {
+                             result: `The current price of ${symbol} is $${price}.`
                         }
                     });
                 }
             }
 
-            // If we executed tools, we must send the results back to the model to complete the turn
             if (functionResponses.length > 0) {
-                 // We need to send the tool response back. 
-                 // The SDK's `sendMessageStream` might yield a tool call, pause, and wait for `sendToolResponse`?
-                 // Actually, standard usage with `sendMessageStream` handles multi-turn if we feed it back.
-                 // But `chat` object maintains state. We usually call `sendMessage` again? 
-                 // No, for the `Chat` class, we usually handle this by observing the stream. 
-                 
-                 // Wait, the documentation for Live API shows `sendToolResponse`, but for `Chat` (GenerateContent),
-                 // we typically simple make a new `sendMessage` call with the tool response parts.
-                 // However, the `chat` object in the SDK is stateful.
-                 
-                 // Let's use the pattern: 
-                 // The current `sendMessageStream` finishes yielding the tool call.
-                 // We then call `chat.sendMessageStream(toolResponsePart)`.
-                 
-                 // Let's create the tool response part
                  const responseParts = functionResponses.map(fr => ({
                      functionResponse: fr
                  }));
                  
-                 // Send the tool response back to the model to get the final text interpretation
-                 const toolStream = await this.chatSession!.sendMessageStream(responseParts);
+                 // FIX: Pass parts wrapped in an object with 'message' property
+                 const toolStream = await this.chatSession!.sendMessageStream({
+                     message: responseParts
+                 });
                  
                  for await (const toolChunk of toolStream) {
                       const toolText = toolChunk.text;

@@ -26,10 +26,12 @@ function App() {
     scrollToBottom();
   }, [messages]);
 
-  const handleSend = async () => {
-    if (!inputValue.trim() || isLoading) return;
+  const handleSend = async (manualInput?: string) => {
+    const textToSend = typeof manualInput === 'string' ? manualInput : inputValue;
 
-    const userText = inputValue;
+    if (!textToSend.trim() || isLoading) return;
+
+    const userText = textToSend;
     setInputValue('');
     
     // Create User Message
@@ -145,10 +147,17 @@ function App() {
           <div className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-3">Watchlist</div>
           <div className="space-y-2">
              {['BTC/USD', 'ETH/USD', 'AAPL', 'GOOGL', 'TSLA'].map(symbol => (
-               <div key={symbol} className="flex items-center justify-between p-2 rounded-lg bg-slate-900/50 border border-slate-800 hover:border-emerald-500/50 transition cursor-pointer group">
+               <button 
+                  key={symbol} 
+                  onClick={() => {
+                      handleSend(`Show chart for ${symbol}`);
+                      setSidebarOpen(false);
+                  }}
+                  className="w-full flex items-center justify-between p-2 rounded-lg bg-slate-900/50 border border-slate-800 hover:border-emerald-500/50 transition cursor-pointer group text-left"
+               >
                   <span className="text-sm font-medium text-slate-300 group-hover:text-emerald-400">{symbol}</span>
                   <BarChart3 size={16} className="text-slate-600 group-hover:text-emerald-500" />
-               </div>
+               </button>
              ))}
           </div>
         </div>
@@ -219,7 +228,7 @@ function App() {
                 style={{ scrollbarWidth: 'none' }}
               />
               <button 
-                onClick={handleSend}
+                onClick={() => handleSend()}
                 disabled={isLoading || !inputValue.trim()}
                 className="absolute right-2 p-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-500 disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-lg shadow-emerald-900/20"
               >
